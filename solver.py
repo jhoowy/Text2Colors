@@ -10,6 +10,7 @@ from skimage.color import lab2rgb
 from model import TPN, PCN
 from data_loader import *
 from util import *
+import tqdm
 
 class Solver(object):
     def __init__(self, args):
@@ -46,7 +47,8 @@ class Solver(object):
 
         inputs = inputs.to(self.device)
         labels = labels.to(self.device)
-        global_hint = (global_hint).expand(-1, -1, imsize, imsize).to(self.device)
+        # global_hint = (global_hint).expand(-1, -1, imsize, imsize).to(self.device)
+        global_hint = global_hint.to(self.device)
         return inputs, labels, global_hint
 
 
@@ -97,10 +99,10 @@ class Solver(object):
             self.D = PCN.Discriminator(self.args.add_L, imsize).to(self.device)
 
             # Optimizer.
-            self.g_optimizer = optim.Adam(self.G.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
-            self.d_optimizer = optim.Adam(self.D.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
-            self.g_scheduler = scheduler.ReduceLROnPlateau(g_optimizer, 'min', patience=5, factor=0.1)
-            self.d_scheduler = scheduler.ReduceLROnPlateau(d_optimizer, 'min', patience=5, factor=0.1)
+            self.g_optimizer = torch.optim.Adam(self.G.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
+            self.d_optimizer = torch.optim.Adam(self.D.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
+            self.g_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.g_optimizer, 'min', patience=5, factor=0.1)
+            self.d_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.d_optimizer, 'min', patience=5, factor=0.1)
 
         elif mode == 'test_TPN' or 'test_text2colors':
             # Data loader.
@@ -172,7 +174,7 @@ class Solver(object):
         print('Start training...')
         start_time = time.time()
         for epoch in range(start_epoch, self.args.num_epochs):
-            for batch_idx, (txt_embeddings, real_palettes) in enumerate(self.train_loader):
+            for batch_idx, (txt_embeddings, real_palettes) in enumerate(tqdm.tqdm(self.train_loader)):
 
                 # Compute text input size (without zero padding).
                 batch_size = txt_embeddings.size(0)
@@ -300,27 +302,29 @@ class Solver(object):
         print('Start training...')
         start_time = time.time()
         for epoch in range(start_epoch, self.args.num_epochs):
-            for i, (images, palettes) in enumerate(self.train_loader):
+            for i, (images, palettes) in enumerate(tqdm.tqdm(self.train_loader)):
 
                 # Prepare training data.
                 palettes = palettes.view(-1, 5, 3).cpu().data.numpy()
                 inputs, real_images, global_hint = self.prepare_data(images, palettes,
                                                                      self.args.always_give_global_hint,
                                                                      self.args.add_L)
+                imsize = images.size(3)
+                global_hint_map = global_hint.reshape(*global_hint.shape, 1, 1).expand(-1, -1, imsize, imsize)
                 batch_size = inputs.size(0)
 
                 # Prepare labels for the BCE loss.
-                real_labels = torch.ones(batch_size).to(self.device)
-                fake_labels = torch.zeros(batch_size).to(self.device)
+                real_labels = torch.ones(batch_size, 1).to(self.device)
+                fake_labels = torch.zeros(batch_size, 1).to(self.device)
 
                 # =============================== Train the discriminator =============================== #
                 # Compute BCE loss using real images and global hint.
-                real = self.D(torch.cat((real_images, global_hint), dim=1))
+                real = self.D(torch.cat((real_images, global_hint_map), dim=1))
                 d_loss_real = criterion_GAN(real, real_labels)
 
                 # Compute BCE loss using fake images and global hint.
                 fake_images = self.G(inputs, global_hint)
-                fake = self.D(torch.cat((fake_images, global_hint), dim=1))
+                fake = self.D(torch.cat((fake_images, global_hint_map), dim=1))
                 d_loss_fake = criterion_GAN(fake, fake_labels)
 
                 d_loss = (d_loss_real + d_loss_fake) * self.args.lambda_GAN
@@ -333,7 +337,7 @@ class Solver(object):
                 # ================================ Train the generator ================================= #
                 # Compute BCE loss (fool the discriminator).
                 fake_images = self.G(inputs, global_hint)
-                fake = self.D(torch.cat((fake_images, global_hint), dim=1))
+                fake = self.D(torch.cat((fake_images, global_hint_map), dim=1))
                 g_loss_GAN = criterion_GAN(fake, real_labels)
 
                 # Compute smooth L1 loss.

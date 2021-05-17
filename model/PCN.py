@@ -256,29 +256,33 @@ class convrelu(nn.Module):
 
 
 class global_network(nn.Module):
-    def __init__(self, image_size, add_L):
+    def __init__(self, image_size, add_L, target_dim):
         super(global_network, self).__init__()
-        if add_L:
-            self.oneD = convrelu(16, 128)
-        else:
-            self.oneD = convrelu(11, 128)
-        self.twoD = convrelu(128, 256)
-        self.threeD = convrelu(256, 512)
-        self.fourD = convrelu(512, 512)
+        in_channel = 16 if add_L else 11
+        self.oneD = nn.Linear(in_channel, 128)
+            
+        if target_dim >= 256:
+            self.twoD = nn.Sequential(nn.Linear(128, 256), nn.ReLU())
+        if target_dim >= 512:
+            self.threeD = nn.Sequential(nn.Linear(256, 512), nn.ReLU())
+            self.fourD = nn.Sequential(nn.Linear(512, 512), nn.ReLU())
+        
+        self.target_dim = target_dim
         self.image_size = image_size
 
-    def forward(self, x, dim):
+    def forward(self, x):
         n = 2
         out = self.oneD(x)
 
-        if dim >= 256:
+        if self.target_dim >= 256:
             n = 4
             out = self.twoD(out)
-        if dim == 512:
+        if self.target_dim == 512:
             n = 8
             out = self.threeD(out)
             out = self.fourD(out)
 
+        out = out.reshape(*out.shape, 1, 1)
         out = out.repeat(1, 1, int(self.image_size / n), int(self.image_size / n))
         return out
 
@@ -287,9 +291,9 @@ class UNet(nn.Module):
     def __init__(self, imsize, add_L):
         super(UNet, self).__init__()
         self.imsize = imsize
-        self.globalnet512 = global_network(self.imsize, add_L)
-        self.globalnet256 = global_network(self.imsize, add_L)
-        self.globalnet128 = global_network(self.imsize, add_L)
+        self.globalnet512 = global_network(self.imsize, add_L, 512)
+        self.globalnet256 = global_network(self.imsize, add_L, 256)
+        self.globalnet128 = global_network(self.imsize, add_L, 128)
 
         self.convlayer1_1 = UNetConvBlock1_1(1, 64)
         self.convlayer1_2 = UNetConvBlock1_2(64, 64)
@@ -318,18 +322,18 @@ class UNet(nn.Module):
         layer3_2 = self.convlayer3_2(layer2)
         layer4 = self.convlayer4(layer3)
 
-        global_net512 = self.globalnet512(side_input, 512)
+        global_net512 = self.globalnet512(side_input)
         layer4 = layer4 + global_net512
         layer5 = self.convlayer5(layer4)
         layer6 = self.convlayer6(layer5)
         layer7 = self.convlayer7(layer6)
 
         layer8 = self.convlayer8(layer7, layer3_2)
-        global_net256 = self.globalnet256(side_input, 256)
+        global_net256 = self.globalnet256(side_input)
         layer8 = layer8 + global_net256
 
         layer9 = self.convlayer9(layer8, layer2_2)
-        global_net128 = self.globalnet128(side_input, 128)
+        global_net128 = self.globalnet128(side_input)
         layer9 = layer9 + global_net128
 
         layer10 = self.convlayer10(layer9, layer1_2_2)

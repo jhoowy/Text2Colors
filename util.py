@@ -105,7 +105,9 @@ def process_palette_lab(pal_data, batch_size):
     img_b_scale = (pal_data[:, :, 2:3] + 127) / 212
     img_lab_scale = np.concatenate((img_l, img_a_scale, img_b_scale), axis=2)
     lab_for_global = torch.from_numpy(img_lab_scale).float()
-    lab_for_global = lab_for_global.view(batch_size, 15).unsqueeze(2).unsqueeze(2)
+    # Modified
+    # lab_for_global = lab_for_global.view(batch_size, 15).unsqueeze(2).unsqueeze(2)
+    lab_for_global = lab_for_global.view(batch_size, 15)
     return lab_for_global
 
 def process_global_ab(input_ab, batch_size, always_give_global_hint):
@@ -126,7 +128,9 @@ def process_global_lab(input_lab, batch_size, always_give_global_hint):
     X_hist = input_lab
 
     if always_give_global_hint:
-        B_hist = torch.ones(batch_size, 1, 1, 1)
+        # Modified
+        # B_hist = torch.ones(batch_size, 1, 1, 1)
+        B_hist = torch.ones(batch_size, 1)
     else:
         B_hist = torch.round(torch.rand(batch_size, 1, 1, 1))
         for l in range(batch_size):
